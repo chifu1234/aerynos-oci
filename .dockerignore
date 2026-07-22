@@ -1,0 +1,8 @@
+.git
+*.md
+build.sh
+# Not needed in the build context: moss is downloaded in the Dockerfile,
+# and the rootfs is produced in a build stage (not copied from the host).
+moss
+rootfs.tar
+**/.DS_Store

@@ -1,0 +1,173 @@
+# Release workflow: build and push the AerynOS image when a git tag is pushed.
+#
+# Trigger:  git push origin <tag>   (not branch commits)
+# Images:   ghcr.io/<owner>/<repo>:<tag>
+#           ghcr.io/<owner>/<repo>:latest   (only if the tag starts with "v")
+# Layers:   zstd-compressed; verified after push
+#
+# Permissions: packages:write via GITHUB_TOKEN.
+# Public packages can be pulled anonymously; private packages need access grants.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # StageX + moss install are x86_64 only
+  PLATFORM: linux/amd64
+  BUILDER_NAME: aerynos-insecure
+
+jobs:
+  build-and-push:
+    name: Build and push
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Image name (GHCR requires lowercase)
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "GIT_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # git tag as image tag (e.g. v1.2.3)
+            type=ref,event=tag
+            # floating latest only for version-style tags
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=AerynOS
+            org.opencontainers.image.description=AerynOS container image (StageX + moss)
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Set up Docker Buildx (security.insecure for moss)
+        uses: docker/setup-buildx-action@v3
+        with:
+          name: ${{ env.BUILDER_NAME }}
+          driver: docker-container
+          buildkitd-flags: --allow-insecure-entitlement security.insecure
+          use: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: final
+          platforms: ${{ env.PLATFORM }}
+          # moss postblit needs Linux namespaces inside BuildKit
+          allow: security.insecure
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            STAGEX_TAG=sx2026.06.0
+            STAGEX_REGISTRY=docker.io/stagex
+            MOSS_VERSION=v0.26.1
+            REPO_NAME=unstable
+            REPO_URL=https://cdn.aerynos.dev/stream/unstable/x86_64/stone.index
+            PACKAGES=bash moss ca-certificates uutils-coreutils curl sed grep
+          # Reproducible-ish releases: no layer cache reuse across tags
+          no-cache: true
+          pull: true
+          provenance: false
+          sbom: false
+          # Push with zstd layer compression (tags: above supply image names)
+          outputs: type=image,push=true,compression=zstd,compression-level=9,force-compression=true
+
+      - name: Verify registry layers use zstd compression
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}
+        run: |
+          set -euo pipefail
+          echo "Inspecting ${IMAGE}"
+          # buildx imagetools prints the image config/manifest tree (OCI)
+          INSPECT="$(docker buildx imagetools inspect "${IMAGE}" --raw)"
+          echo "${INSPECT}" | head -c 2000
+          echo ""
+          # Accept either embedded manifest or index → we require at least one zstd layer media type
+          if ! echo "${INSPECT}" | grep -q 'tar+zstd'; then
+            # Fallback: resolve platform manifest via jq if raw is an index
+            if command -v jq >/dev/null 2>&1; then
+              DIGEST="$(echo "${INSPECT}" | jq -r '
+                if .mediaType | test("index") then
+                  .manifests[] | select(.platform.architecture=="amd64" and .platform.os=="linux") | .digest
+                else empty end
+              ' | head -1)"
+              if [ -n "${DIGEST:-}" ]; then
+                MANIFEST="$(docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}" --raw)"
+                echo "${MANIFEST}" | head -c 2000
+                echo "${MANIFEST}" | grep -q 'tar+zstd'
+              else
+                echo "${INSPECT}" | grep -q 'tar+zstd'
+              fi
+            else
+              echo "error: no tar+zstd mediaType found in image manifest (expected zstd compression)" >&2
+              exit 1
+            fi
+          fi
+          echo "OK: layer mediaType includes application/vnd.oci.image.layer.v1.tar+zstd"
+
+      - name: Smoke test (pull from registry)
+        run: |
+          set -euo pipefail
+          # Prefer the git-tag tag for the smoke pull
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}"
+          echo "Pulling ${IMAGE}"
+          docker pull --platform "${{ env.PLATFORM }}" "${IMAGE}"
+          docker run --rm --platform "${{ env.PLATFORM }}" "${IMAGE}" \
+            /usr/bin/bash -lc '
+              set -e
+              command -v sed
+              command -v grep
+              command -v curl
+              command -v moss
+              sed --version | head -1
+              curl -fsSI https://cdn.aerynos.dev/ | head -1
+              nonesuch_xyz_123 2>&1 | head -1 || true
+              [ 1 -eq 1 ] && echo bracket_ok
+              echo SMOKE_OK
+            '
+
+      - name: Summary
+        run: |
+          {
+            echo "## Released \`${{ env.GIT_TAG }}\`"
+            echo ""
+            echo "| | |"
+            echo "|--|--|"
+            echo "| Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}\` |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Platform | \`${{ env.PLATFORM }}\` |"
+            echo "| Compression | \`zstd\` (force-compression=true, level=9) |"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}"
+            echo "docker run --rm -it --platform linux/amd64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_TAG }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

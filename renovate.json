@@ -1,0 +1,128 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Chore updates: GitHub Actions, StageX tags, moss releases, Dockerfile frontend.",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)",
+    "helpers:pinGitHubActionDigests",
+    "workarounds:all"
+  ],
+  "labels": ["dependencies", "chore"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard (chores)",
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 5,
+  "rangeStrategy": "pin",
+  "timezone": "UTC",
+  "schedule": ["at any time"],
+
+  "enabledManagers": [
+    "github-actions",
+    "dockerfile",
+    "custom.regex"
+  ],
+
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "StageX image tag (sxYYYY.MM.P) in Dockerfile, build.sh, workflows",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/",
+        "/(^|/)build\\.sh$/",
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "STAGEX_TAG=[\"']?\\$\\{STAGEX_TAG:-(?<currentValue>sx[0-9][0-9.]*)\\}[\"']?",
+        "STAGEX_TAG=(?<currentValue>sx[0-9][0-9.]*)"
+      ],
+      "datasourceTemplate": "docker",
+      "packageNameTemplate": "stagex/core-filesystem",
+      "versioningTemplate": "regex:^(?<compatibility>sx)(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "moss release (AerynOS/os-tools) in Dockerfile, build.sh, workflows",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/",
+        "/(^|/)build\\.sh$/",
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "MOSS_VERSION=[\"']?\\$\\{MOSS_VERSION:-(?<currentValue>v[0-9][^}\\s\"']*)\\}[\"']?",
+        "MOSS_VERSION=(?<currentValue>v[0-9][^\\s\"'}]*)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "AerynOS/os-tools",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
+      "description": "Dockerfile BuildKit frontend (# syntax=docker/dockerfile:…)",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": [
+        "#\\s*syntax=docker/dockerfile:(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "packageNameTemplate": "docker/dockerfile",
+      "versioningTemplate": "docker"
+    }
+  ],
+
+  "packageRules": [
+    {
+      "description": "Label all managed updates as chores",
+      "matchManagers": ["github-actions", "dockerfile", "custom.regex"],
+      "addLabels": ["chore"]
+    },
+    {
+      "description": "StageX tags use sxYYYY.MM.P (not semver) — apply to docker manager too",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "stagex/core-filesystem",
+        "stagex/core-musl",
+        "stagex/core-busybox",
+        "docker.io/stagex/core-filesystem",
+        "docker.io/stagex/core-musl",
+        "docker.io/stagex/core-busybox"
+      ],
+      "versioning": "regex:^(?<compatibility>sx)(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "groupName": "stagex",
+      "commitMessageTopic": "StageX"
+    },
+    {
+      "description": "One PR for all GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "commitMessageTopic": "GitHub Actions"
+    },
+    {
+      "description": "One PR for moss release pins",
+      "matchDatasources": ["github-releases"],
+      "matchPackageNames": ["AerynOS/os-tools"],
+      "groupName": "moss",
+      "commitMessageTopic": "moss"
+    },
+    {
+      "description": "Dockerfile frontend image",
+      "matchPackageNames": ["docker/dockerfile"],
+      "groupName": "dockerfile-syntax",
+      "commitMessageTopic": "Dockerfile syntax"
+    },
+    {
+      "description": "Ignore floating ubuntu-latest runner label noise",
+      "matchDepNames": ["ubuntu"],
+      "matchManagers": ["github-actions"],
+      "enabled": false
+    },
+    {
+      "description": "Automerge routine GitHub Action pin/digest/patch/minor updates",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["pin", "digest", "patch", "minor"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    }
+  ]
+}
