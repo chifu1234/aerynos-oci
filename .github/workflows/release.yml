@@ -86,7 +86,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            STAGEX_TAG=sx2026.06.0
+            STAGEX_TAG=sx2026.10.0
             STAGEX_REGISTRY=docker.io/stagex
             MOSS_VERSION=v0.26.1
             REPO_NAME=unstable

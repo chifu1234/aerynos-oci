@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 # Build args (global)
 # ---------------------------------------------------------------------------
-ARG STAGEX_TAG=sx2026.06.0
+ARG STAGEX_TAG=sx2026.10.0
 ARG STAGEX_REGISTRY=docker.io/stagex
 ARG MOSS_VERSION=v0.26.1
 ARG REPO_NAME=unstable

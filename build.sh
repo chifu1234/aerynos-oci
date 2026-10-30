@@ -7,7 +7,7 @@
 # Usage:
 #   ./build.sh
 #   IMAGE_TAG=aerynos:base PACKAGES="pkgset-aeryn-base ..." ./build.sh
-#   STAGEX_TAG=sx2026.06.0 MOSS_VERSION=v0.26.1 ./build.sh
+#   STAGEX_TAG=sx2026.10.0 MOSS_VERSION=v0.26.1 ./build.sh
 #   CLEAN=0 ./build.sh          # reuse Buildx cache
 
 set -euo pipefail
@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 IMAGE_TAG="${IMAGE_TAG:-aerynos:unstable}"
 BUILDER_NAME="${BUILDER_NAME:-aerynos-insecure}"
 MOSS_VERSION="${MOSS_VERSION:-v0.26.1}"
-STAGEX_TAG="${STAGEX_TAG:-sx2026.06.0}"
+STAGEX_TAG="${STAGEX_TAG:-sx2026.10.0}"
 STAGEX_REGISTRY="${STAGEX_REGISTRY:-docker.io/stagex}"
 REPO_NAME="${REPO_NAME:-unstable}"
 REPO_URL="${REPO_URL:-https://cdn.aerynos.dev/stream/unstable/x86_64/stone.index}"
